@@ -28,6 +28,7 @@ struct Game
 };
 
 void printGames(Game games[]);
+bool othersockets(Game g, int valr, struct sockaddr_in addre, int adrlen);
 
 int main(int argc, char *argv[])
 {
@@ -55,12 +56,12 @@ int main(int argc, char *argv[])
 	//Initialize all client sockets and boards to 0
 	for(i = 0; i < MAXCLIENTS; i++)
 	{
-		games.playerOne[i] = -1;
-		games.playerTwo[i] = -1;
-		games.moveTurn = 1;
+		games[i].playerOne = -1;
+		games[i].playerTwo = -1;
+		games[i].moveTurn = 1;
 		for(int j = 0; j < MAXCLIENTS; j++)
 		{
-			games.board[j] = 0;
+			games[i].board[j] = 0;
 		}
 	}
 
@@ -223,51 +224,74 @@ int main(int argc, char *argv[])
 				//We can start the game. Send them the current board
 				playerWaiting = false;
 				message = "Opponent found! Starting game...\r\n";
-				send(new_socket, message, strlen(message), 0);
-				send(client_socket[pp], message, strlen(message), 0);
+				send(games[newPlayerIndex].playerOne, message, strlen(message), 0);
+				send(games[newPlayerIndex].playerTwo, message, strlen(message), 0);
 			}
 		}
 
 		//Else its some IO operation on some other socket
 		//This means players in a current game are making a move
 		for(i = 0; i < MAXCLIENTS; i++)
-		{
-			sd = client_socket[i];
-
-			if(FD_ISSET(sd, &readfds))
-			{
-				//Check if it was for closing and also read the incoming message
-				if((valread = read(sd, buffer, 1024)) == 0)
-				{
-					//Somebody disconnected, get details and print
-					getpeername(sd, (struct sockaddr*)&address, \
-							(socklen_t*)&addrlen);
-					std::cout << "Host disconnected, ip: " << inet_ntoa(address.sin_addr) <<
-					"port: " << ntohs(address.sin_port) << std::endl;
-
-					//Inform their opponent that they left
-					int oppIndex = getIndexOfOpponent(sd, playerPair, client_socket, MAXCLIENTS, MAXCLIENTS);
-					message = "Your opponent has disconnected. You win!\nWaiting for another player...\r\n";
-					send(client_socket[oppIndex], message, strlen(message), 0);
-					playerWaiting = true;
-
-
-					//Close the socket and mark as 0 in list for reuse
-					close(sd);
-					client_socket[i] = 0;
-					//Let game list know that someone needs a new opponent
-					//playerPair[] = -1;
-					printGames(playerPair);
-					printConnections(client_socket);
-				}
-				else
-				{
-					
-				}
-			}
+		{	
+			playerWaiting = othersockets(games[i], valread, address, addrlen);
 		}
 	}
 	return 0;
+}
+
+//Returns new value for player waiting if someone disconnects
+bool othersockets(Game g, int valr, struct sockaddr_in addre, int adrlen)
+{
+	bool pw = false;
+	int *socDesc;
+	int *oppSocDesc;
+	char buf[1025];
+	for(int i = 0; i <= 1; i++)
+	{
+		if(i == 0)
+		{
+			socDesc = &g.playerOne;
+			oppSocDesc = &g.playerTwo;
+		}
+		else
+		{
+			socDesc = &g.playerTwo;
+			oppSocDesc = &g.playerOne;
+		}
+		//Check if it was for closing and also read the incoming message
+		if((valr = read(*socDesc, buf, 1024)) == 0)
+		{
+			//Somebody disconnected, get details and print
+			getpeername(*socDesc, (struct sockaddr*)&addre, \
+				(socklen_t*)&adrlen);
+			std::cout << "Host disconnected, ip: " << inet_ntoa(addre.sin_addr) <<
+			"port: " << ntohs(addre.sin_port) << std::endl;
+
+			//Inform their opponent that they left
+			const char *msg = "Your opponent has disconnected. You win!\nWaiting for another player...\r\n";
+			send(*oppSocDesc, msg, strlen(msg), 0);
+			pw = true;
+
+
+			//Close the socket and mark as 0 in list for reuse
+			close(*socDesc);
+			if(*socDesc == g.playerOne)
+			{
+				close(g.playerOne);
+				g.playerOne = -1;
+			}
+			else
+			{
+				close(g.playerTwo);
+				g.playerTwo = -1;
+			}
+		}
+		else
+		{
+
+		}
+	}
+	return pw;
 }
 
 int getIndexOfOpponent(int curSocket, Game games[], int cs[], int ng, int nc)
@@ -290,8 +314,8 @@ void printGames(Game games[])
 	for(int i = 0; i < MAXCLIENTS; i++)
 	{
 		std::cout << i << std::endl;
-		std::cout << "indexOne: " << games[i].indexOne << std::endl;
-		std::cout << "indexTwo: " << games[i].indexTwo << std::endl;
+		std::cout << "indexOne: " << games[i].playerOne << std::endl;
+		std::cout << "indexTwo: " << games[i].playerTwo << std::endl;
 		std::cout << std::endl;
 	}
 }
