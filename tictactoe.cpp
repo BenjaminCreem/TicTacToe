@@ -21,21 +21,21 @@
 
 struct Game
 {
-	int indexOne;
-	int indexTwo;
+	int playerOne;
+	int playerTwo;
 	int moveTurn; //1 if playerOnes turn, 2 if playerTwos turn
 	int board[9];
 };
 
-int getIndexOfOpponent(int curSocket, Game games[], int cs[], int ng, int nc);
+void printGames(Game games[]);
 
 int main(int argc, char *argv[])
 {
 	int opt = TRUE;
-	int master_socket, addrlen, new_socket, client_socket[MAXCLIENTS], activity, i, valread, sd;
+	int master_socket, addrlen, new_socket, activity, i, valread, sd;
 	int max_sd;
 	struct sockaddr_in address;
-	Game playerPair[MAXCLIENTS]; //Used to keep track of which players are paired up together
+	Game games[MAXCLIENTS]; //Used to keep track of which players are paired up together
 
 	//Set to True if we have an odd number of players which would mean someone is waiting
 	//for a game, false otherwise
@@ -52,18 +52,16 @@ int main(int argc, char *argv[])
 	//Welcome message
 	const char *welcome = "Welcome to Tic Tac Toe!\r\n";
 
-	//Initialize all client sockets to 0
+	//Initialize all client sockets and boards to 0
 	for(i = 0; i < MAXCLIENTS; i++)
 	{
-		client_socket[i] = 0;
-	}
-
-	//Initialize all playerPairs to 0
-	for(i = 0; i < MAXCLIENTS; i++)
-	{
-		playerPair[i].indexOne = 0;
-		playerPair[i].indexTwo = 0;
-		playerPair[i].moveTurn = 1; 
+		games.playerOne[i] = -1;
+		games.playerTwo[i] = -1;
+		games.moveTurn = 1;
+		for(int j = 0; j < MAXCLIENTS; j++)
+		{
+			games.board[j] = 0;
+		}
 	}
 
 	//Create a master socket
@@ -128,11 +126,26 @@ int main(int argc, char *argv[])
 		FD_SET(master_socket, &readfds);
 		max_sd = master_socket;
 
-		//Add child sockets to set
+		//Add player one child sockets to set
 		for(i = 0; i < MAXCLIENTS; i++)
 		{
 			//Socket Descriptor
-			sd = client_socket[i];
+			sd = games[i].playerOne;
+
+			//If valid socket descriptor then add to read list
+			if(sd > 0)
+				FD_SET(sd, &readfds);
+
+			//Highest file descriptor number, needed for select function
+			if(sd > max_sd)
+				max_sd = sd;
+		}		
+
+		//Add player two child sockets to set
+		for(i = 0; i < MAXCLIENTS; i++)
+		{
+			//Socket Descriptor
+			sd = games[i].playerTwo;
 
 			//If valid socket descriptor then add to read list
 			if(sd > 0)
@@ -147,7 +160,7 @@ int main(int argc, char *argv[])
 		activity = select(max_sd + 1, &readfds, NULL, NULL, NULL);
 		if((activity < 0) && (errno != EINTR))
 		{
-			std::cout << "select eror" << std::endl;
+			std::cout << "select error" << std::endl;
 		}
 
 		//If something happened on he master socket then it is an incoming connection
@@ -172,29 +185,14 @@ int main(int argc, char *argv[])
 			}
 			puts("Welcome message sent successfully");
 
-			int pos = 0;
-
-			//Add new socket to array of sockets
-			for(i = 0; i < MAXCLIENTS; i++)
-			{
-				//if position is empty
-				if(client_socket[i] == 0)
-				{
-					pos = i;
-					client_socket[i] = new_socket;
-					std::cout << "Adding to list of sockets as " << i << std::endl;
-					break;				
-				}
-			}
-
 			//Set up their game
 			if(!playerWaiting)
 			{
 				for(i = 0; i < MAXCLIENTS; i++)
 				{
-					if(playerPair[i].indexOne == 0)
+					if(games[i].playerOne == -1)
 					{
-						playerPair[i].indexOne = pos;
+						games[i].playerOne = new_socket;
 						break;
 					}
 				}
@@ -204,21 +202,21 @@ int main(int argc, char *argv[])
 			}
 			else //Pair them up with someone who is waiting
 			{
-				int pp;
+				int newPlayerIndex;
 				for(i = 0; i < MAXCLIENTS; i++)
 				{
-					if(playerPair[i].indexOne == 0)
+					if(games[i].playerOne != -1)
 					{
-						playerPair[i].indexTwo = pos;
-						pp = i;
+						games[i].playerTwo = new_socket;
+						newPlayerIndex = i;
 						break;
 					}
 					//Someone may have disconnected mid game which could cause this
 					//to be necessary. Otherwise they could sit without an opponent forever. 
-					else if(playerPair[i].indexTwo == 0)
+					else if(games[i].playerTwo != -1)
 					{
-						playerPair[i].indexOne = pos;
-						pp = i;
+						games[i].playerOne = new_socket;
+						newPlayerIndex = i;
 						break;
 					}
 				}	
@@ -228,8 +226,6 @@ int main(int argc, char *argv[])
 				send(new_socket, message, strlen(message), 0);
 				send(client_socket[pp], message, strlen(message), 0);
 			}
-
-			
 		}
 
 		//Else its some IO operation on some other socket
@@ -260,7 +256,9 @@ int main(int argc, char *argv[])
 					close(sd);
 					client_socket[i] = 0;
 					//Let game list know that someone needs a new opponent
-					//playerPair[] = 0;
+					//playerPair[] = -1;
+					printGames(playerPair);
+					printConnections(client_socket);
 				}
 				else
 				{
@@ -275,6 +273,27 @@ int main(int argc, char *argv[])
 int getIndexOfOpponent(int curSocket, Game games[], int cs[], int ng, int nc)
 {
 	return 0;
+}
+
+void printConnections(int cs[])
+{
+	std::cout << "Current Connections" << std::endl;
+	for(int i = 0; i < MAXCLIENTS; i++)
+	{
+		std::cout << i << ": " << cs[i] << std::endl;
+	}
+}
+
+void printGames(Game games[])
+{
+	std::cout << "Current Games" << std::endl;
+	for(int i = 0; i < MAXCLIENTS; i++)
+	{
+		std::cout << i << std::endl;
+		std::cout << "indexOne: " << games[i].indexOne << std::endl;
+		std::cout << "indexTwo: " << games[i].indexTwo << std::endl;
+		std::cout << std::endl;
+	}
 }
 
 
